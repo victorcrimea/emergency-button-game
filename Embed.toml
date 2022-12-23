@@ -1,0 +1,9 @@
+[default.general]
+chip = "STM32F051R8Tx"
+
+
+[default.rtt]
+enabled = true
+
+[default.gdb]
+enabled = true
