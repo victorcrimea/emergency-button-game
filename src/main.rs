@@ -4,12 +4,9 @@
 use core::fmt::Write;
 use panic_halt as _;
 
-use hal::spi::*;
+use stm32f4xx_hal as hal;
 
-use stm32f0xx_hal as hal;
-use stm32f0xx_hal::delay::Delay;
-
-use crate::hal::{pac, prelude::*};
+use crate::hal::{gpio::NoPin, pac, prelude::*};
 
 use cortex_m_rt::entry;
 
@@ -25,44 +22,54 @@ use embedded_graphics::{
 use st7920::ST7920;
 
 use heapless::String;
+use stm32f4xx_hal::spi::{Mode, Phase, Polarity};
 
 #[entry]
 fn main() -> ! {
 	rtt_init_print!();
 	let mut x = 0;
-	if let Some(mut p) = pac::Peripherals::take() {
-		let mut rcc = p.RCC.configure().sysclk(8.mhz()).freeze(&mut p.FLASH);
+	if let Some(p) = pac::Peripherals::take() {
+		let rcc = p.RCC.constrain();
+		//let mut rcc = p.RCC.configure().sysclk(8.mhz()).freeze(&mut p.FLASH);
+		let clocks = rcc.cfgr.use_hse(25.MHz()).sysclk(50.MHz()).freeze();
 
-		let core = cortex_m::Peripherals::take().unwrap();
+		let mut delay = p.TIM1.delay_us(&clocks);
 
-		let gpioc = p.GPIOC.split(&mut rcc);
+		let gpioc = p.GPIOC.split();
 
-		// (Re-)configure PC8 as output
-		let mut blue_led = cortex_m::interrupt::free(|cs| gpioc.pc8.into_push_pull_output(cs));
-		let mut green_led = cortex_m::interrupt::free(|cs| gpioc.pc9.into_push_pull_output(cs));
-
-		let mut delay = Delay::new(core.SYST, &rcc);
+		// (Re-)configure PC13 as output
+		let mut blue_led = gpioc.pc13.into_push_pull_output();
 
 		rprintln!("Hello, world!");
 
-		blue_led.toggle().ok();
+		blue_led.toggle();
 
 		// Display init
-		let gpioa = p.GPIOA.split(&mut rcc);
-		let sck = cortex_m::interrupt::free(|cs| gpioa.pa5.into_alternate_af0(cs));
-		let mosi = cortex_m::interrupt::free(|cs| gpioa.pa7.into_alternate_af0(cs));
-		let _miso = cortex_m::interrupt::free(|cs| gpioa.pa6.into_alternate_af0(cs));
-		let reset = cortex_m::interrupt::free(|cs| gpioa.pa1.into_push_pull_output(cs));
-		let cs = cortex_m::interrupt::free(|cs| gpioa.pa2.into_push_pull_output(cs));
-		let spi = Spi::spi1(
-			p.SPI1,
-			(sck, _miso, mosi),
+		let gpioa = p.GPIOA.split();
+		// let sck = cortex_m::interrupt::free(|cs| gpioa.pa5.into_alternate_af0(cs));
+		// let mosi = cortex_m::interrupt::free(|cs| gpioa.pa7.into_alternate_af0(cs));
+		// let _miso = cortex_m::interrupt::free(|cs| gpioa.pa6.into_alternate_af0(cs));
+		let reset = gpioa.pa4.into_push_pull_output();
+		let cs = gpioa.pa2.into_push_pull_output();
+		// let spi = Spi::spi1(
+		// 	p.SPI1,
+		// 	(sck, _miso, mosi),
+		// 	Mode {
+		// 		polarity: Polarity::IdleLow,
+		// 		phase: Phase::CaptureOnFirstTransition,
+		// 	},
+		// 	1_000_000.hz(),
+		// 	&mut rcc,
+		// );
+
+		let spi = p.SPI1.spi(
+			(gpioa.pa5, NoPin, gpioa.pa7),
 			Mode {
 				polarity: Polarity::IdleLow,
 				phase: Phase::CaptureOnFirstTransition,
 			},
-			1_000_000.hz(),
-			&mut rcc,
+			300_000.Hz(),
+			&clocks,
 		);
 
 		let mut disp = ST7920::new(spi, reset, Some(cs), false);
@@ -82,8 +89,7 @@ fn main() -> ! {
 		disp.flush(&mut delay).expect("could not flush display");
 
 		loop {
-			blue_led.toggle().ok();
-			green_led.toggle().ok();
+			blue_led.toggle();
 			delay.delay_ms(200u16);
 			x += 1;
 
