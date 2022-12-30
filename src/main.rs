@@ -65,6 +65,7 @@ fn main() -> ! {
 		let gpioa = p.GPIOA.split();
 		let reset = gpioa.pa4.into_push_pull_output();
 		let cs = gpioa.pa2.into_push_pull_output();
+		//let mut buzzer = gpiob.pb12.into_push_pull_output();
 
 		let spi = p.SPI1.spi(
 			(gpioa.pa5, NoPin, gpioa.pa7),
@@ -72,7 +73,7 @@ fn main() -> ! {
 				polarity: Polarity::IdleLow,
 				phase: Phase::CaptureOnFirstTransition,
 			},
-			800_000.Hz(),
+			300_000.Hz(),
 			&clocks,
 		);
 
@@ -119,14 +120,14 @@ fn main() -> ! {
 
 		let rounds_text = Text::new(
 			rounds_string.as_str(),
-			Point::new(55, 26),
+			Point::new(55, 60),
 			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
 		);
 		rounds_text.draw(&mut disp).unwrap();
 
 		let level_text = Text::new(
 			level_string.as_str(),
-			Point::new(1, 26),
+			Point::new(1, 60),
 			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
 		);
 		level_text.draw(&mut disp).unwrap();
@@ -145,7 +146,7 @@ fn main() -> ! {
 			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
 		);
 
-		let speeds: [u8; 9] = [40, 30, 20, 10, 8, 6, 4, 2, 1];
+		let speeds: [(u8); 9] = [(40), (30), (20), (10), (10), (10), (10), (10), (10)];
 		let rounds_per_level = 10;
 		let mut rounds_in_level = rounds_per_level;
 
@@ -156,9 +157,13 @@ fn main() -> ! {
 				level += 1;
 				rounds_in_level = rounds_per_level;
 			}
+
 			'led_outer: for j in 0..NUM_LEDS {
 				if (j == NUM_LEDS - 1 - dead) {
 					dead += 1;
+					//buzzer.set_high();
+					//delay.delay_ms(200u16);
+					//buzzer.set_low();
 				}
 
 				if (j >= target_start && j <= target_end) {
@@ -258,13 +263,13 @@ fn main() -> ! {
 
 			let rounds_text = Text::new(
 				rounds_string.as_str(),
-				Point::new(55, 26),
+				Point::new(55, 60),
 				MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
 			);
 
 			let level_text = Text::new(
 				level_string.as_str(),
-				Point::new(1, 26),
+				Point::new(1, 60),
 				MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
 			);
 
