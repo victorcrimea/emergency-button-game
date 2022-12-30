@@ -31,10 +31,10 @@ use ws2812_timer_delay as ws2812;
 #[entry]
 fn main() -> ! {
 	rtt_init_print!();
-	let mut x = 0;
+
 	if let Some(p) = pac::Peripherals::take() {
 		let rcc = p.RCC.constrain();
-		let clocks = rcc.cfgr.use_hse(25.MHz()).sysclk(50.MHz()).freeze();
+		let clocks = rcc.cfgr.use_hse(25.MHz()).sysclk(84.MHz()).freeze();
 		//let clocks = rcc.cfgr.sysclk(84.MHz()).freeze();
 
 		let mut delay = p.TIM1.delay_us(&clocks);
@@ -64,7 +64,7 @@ fn main() -> ! {
 		// Display init
 		let gpioa = p.GPIOA.split();
 		let reset = gpioa.pa4.into_push_pull_output();
-		let cs = gpioa.pa6.into_push_pull_output();
+		let cs = gpioa.pa2.into_push_pull_output();
 
 		let spi = p.SPI1.spi(
 			(gpioa.pa5, NoPin, gpioa.pa7),
@@ -72,7 +72,7 @@ fn main() -> ! {
 				polarity: Polarity::IdleLow,
 				phase: Phase::CaptureOnFirstTransition,
 			},
-			600_000.Hz(),
+			800_000.Hz(),
 			&clocks,
 		);
 
@@ -80,70 +80,251 @@ fn main() -> ! {
 		disp.init(&mut delay).expect("could not init display");
 		disp.clear(&mut delay).expect("could not clear display");
 
-		let c = Circle::new(Point::new(20, 20), 20)
-			.into_styled(PrimitiveStyle::with_fill(BinaryColor::On));
-		let hello = Text::new(
-			"Hello Rust!",
-			Point::new(40, 16),
+		let mut button_right = gpioa.pa11.into_pull_up_input();
+		let mut button_left = gpioa.pa8.into_pull_up_input();
+		let mut button_restart = gpioa.pa1.into_pull_up_input();
+
+		let player1 = Text::new(
+			"Left",
+			Point::new(1, 5),
 			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
 		);
 
-		c.draw(&mut disp).unwrap();
-		hello.draw(&mut disp).unwrap();
+		let player2 = Text::new(
+			"Right",
+			Point::new(99, 5),
+			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+		);
+
+		player1.draw(&mut disp).unwrap();
+		player2.draw(&mut disp).unwrap();
+
+		let mut score_left = 0;
+		let mut score_right = 0;
+		let mut rounds = 0;
+		let mut dead = 0;
+		let mut level = 0;
+		let mut player1_early = false;
+		let mut player2_early = false;
+		let target_start = 31;
+		let target_end = 41;
+
+		let mut rounds_string: String<80> = String::from("Rounds: 0");
+		let mut score_left_string: String<20> = String::from("0000");
+		let mut score_right_string: String<20> = String::from("0000");
+		let game_over_string: String<40> = String::from("Game Over!");
+		let mut level_string: String<40> = String::from("Level: 0");
+		let player_1_early_string: String<40> = String::from("Early!");
+		let player_2_early_string: String<40> = String::from("Early!");
+
+		let rounds_text = Text::new(
+			rounds_string.as_str(),
+			Point::new(55, 26),
+			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+		);
+		rounds_text.draw(&mut disp).unwrap();
+
+		let level_text = Text::new(
+			level_string.as_str(),
+			Point::new(1, 26),
+			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+		);
+		level_text.draw(&mut disp).unwrap();
+
 		disp.flush(&mut delay).expect("could not flush display");
 
-		loop {
-			// rgb
+		let player_1_early_text = Text::new(
+			player_1_early_string.as_str(),
+			Point::new(1, 36),
+			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+		);
 
-			// for j in 0..NUM_LEDS {
-			// 	for i in 0..NUM_LEDS {
-			// 		let mut color_on = RGB8 { r: 64, g: 0, b: 0 };
-			// 		let mut color_off = RGB8 { r: 0, g: 0, b: 0 };
-			// 		let mut color_target = RGB8 { r: 0, g: 32, b: 0 };
-			// 		let mut color_target_on = RGB8 {
-			// 			r: 127,
-			// 			g: 32,
-			// 			b: 0,
-			// 		};
-			//
-			// 		if i == j {
-			// 			data[NUM_LEDS - i - 1] = color_on;
-			// 		} else {
-			// 			data[NUM_LEDS - i - 1] = color_off;
-			// 		}
-			//
-			// 		if (i >= 26 && i <= 36) {
-			// 			data[NUM_LEDS - i - 1] = color_target;
-			// 			if i == j {
-			// 				data[NUM_LEDS - i - 1] = color_target_on;
-			// 			}
-			// 		}
-			// 	}
-			// 	// before writing, apply gamma correction for nicer rainbow
-			// 	ws.write(gamma(data.iter().cloned())).unwrap();
-			// 	delay.delay_ms(5u16);
-			// }
+		let player_2_early_text = Text::new(
+			player_2_early_string.as_str(),
+			Point::new(90, 36),
+			MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+		);
+
+		let speeds: [u8; 9] = [40, 30, 20, 10, 8, 6, 4, 2, 1];
+		let rounds_per_level = 10;
+		let mut rounds_in_level = rounds_per_level;
+
+		'main_loop: loop {
+			// rgb
+			rounds_in_level -= 1;
+			if rounds_in_level == 0 && level < 8 {
+				level += 1;
+				rounds_in_level = rounds_per_level;
+			}
+			'led_outer: for j in 0..NUM_LEDS {
+				if (j == NUM_LEDS - 1 - dead) {
+					dead += 1;
+				}
+
+				if (j >= target_start && j <= target_end) {
+					if !player2_early {
+						if button_right.is_low() {
+							score_right += 1;
+							loop {
+								if button_right.is_high() {
+									break;
+								}
+								continue;
+							}
+							break 'led_outer;
+						}
+					}
+					if !player1_early {
+						if button_left.is_low() {
+							score_left += 1;
+							loop {
+								if button_left.is_high() {
+									break;
+								}
+								continue;
+							}
+							break 'led_outer;
+						}
+					}
+				}
+
+				if j < target_start {
+					if !player2_early {
+						if button_right.is_low() {
+							player2_early = true;
+							score_right -= 1;
+							player_2_early_text.draw(&mut disp).unwrap();
+							disp.flush(&mut delay).expect("could not flush display");
+						}
+					}
+
+					if !player1_early {
+						if button_left.is_low() {
+							player1_early = true;
+							score_left -= 1;
+							player_1_early_text.draw(&mut disp).unwrap();
+							disp.flush(&mut delay).expect("could not flush display");
+						}
+					}
+				}
+
+				for i in 0..NUM_LEDS {
+					let mut color_on = RGB8 { r: 64, g: 0, b: 0 };
+					let mut color_off = RGB8 { r: 0, g: 0, b: 0 };
+					let mut color_target = RGB8 { r: 0, g: 32, b: 0 };
+					let mut color_dead = RGB8 { r: 64, g: 0, b: 0 };
+					let mut color_target_on = RGB8 {
+						r: 127,
+						g: 32,
+						b: 0,
+					};
+
+					if i == j {
+						data[NUM_LEDS - i - 1] = color_on;
+					} else {
+						data[NUM_LEDS - i - 1] = color_off;
+					}
+
+					if (i >= target_start && i <= target_end) {
+						data[NUM_LEDS - i - 1] = color_target;
+						if i == j {
+							data[NUM_LEDS - i - 1] = color_target_on;
+						}
+					}
+
+					if i > NUM_LEDS - 1 - dead {
+						data[NUM_LEDS - i - 1] = color_dead;
+					}
+				}
+
+				// before writing, apply gamma correction for nicer rainbow
+				ws.write(gamma(data.iter().cloned())).unwrap();
+				delay.delay_ms(speeds[level]);
+			}
 
 			blue_led.toggle();
-			delay.delay_ms(500u16);
-			x += 1;
+			//delay.delay_ms(500u16);
+			rounds += 1;
 
-			let mut s: String<150> = String::from("");
-			write!(&mut s, "X = {:?}", x);
+			rounds_string.clear();
+			level_string.clear();
+			score_left_string.clear();
+			score_right_string.clear();
 
-			let t = Text::new(
-				s.as_str(),
-				Point::new(40, 26),
+			write!(&mut rounds_string, "Rounds: {:?}", rounds);
+			write!(&mut level_string, "Level: {:?}", level);
+			write!(&mut score_left_string, "{:?}", score_left);
+			write!(&mut score_right_string, "{:?}", score_right);
+
+			let rounds_text = Text::new(
+				rounds_string.as_str(),
+				Point::new(55, 26),
+				MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+			);
+
+			let level_text = Text::new(
+				level_string.as_str(),
+				Point::new(1, 26),
+				MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+			);
+
+			let score_left_text = Text::new(
+				score_left_string.as_str(),
+				Point::new(1, 14),
+				MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+			);
+
+			let score_right_text = Text::new(
+				score_right_string.as_str(),
+				Point::new(99, 14),
 				MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
 			);
 
 			disp.clear_buffer();
-			c.draw(&mut disp).unwrap();
-			hello.draw(&mut disp).unwrap();
-			t.draw(&mut disp).unwrap();
+			player1.draw(&mut disp).unwrap();
+			player2.draw(&mut disp).unwrap();
+
+			rounds_text.draw(&mut disp).unwrap();
+			level_text.draw(&mut disp).unwrap();
+
+			score_left_text.draw(&mut disp).unwrap();
+			score_right_text.draw(&mut disp).unwrap();
+
+			if player1_early {
+				player1_early = false;
+			}
+
+			if player2_early {
+				player2_early = false;
+			}
+
+			if (dead == 42) {
+				let game_over_text = Text::new(
+					game_over_string.as_str(),
+					Point::new(35, 46),
+					MonoTextStyle::new(&FONT_6X9, BinaryColor::On),
+				);
+				game_over_text.draw(&mut disp).unwrap();
+				disp.flush(&mut delay).expect("could not flush display");
+				loop {
+					if button_restart.is_low() {
+						rounds = 0;
+						score_left = 0;
+						score_right = 0;
+						dead = 0;
+						level = 0;
+						rounds_in_level = rounds_per_level;
+						player1_early = false;
+						player2_early = false;
+						break;
+					}
+					continue;
+				}
+			}
+
 			disp.flush(&mut delay).expect("could not flush display");
 
-			rprintln!("X = {:?}", x);
+			rprintln!("X = {:?}", rounds);
 		}
 	}
 
