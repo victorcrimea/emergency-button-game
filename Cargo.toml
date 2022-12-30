@@ -10,7 +10,7 @@ cortex-m = "0.7"
 cortex-m-rt = "0.7"
 panic-halt = "0.2"
 rtt-target = {version="0.3.1",  features = ["cortex-m"]}
-stm32f0xx-hal = { version = "0.18", features = ["stm32f051"]}
+stm32f4xx-hal = { version = "0.14.0", features = ["stm32f401"]}
 embedded-graphics = "0.7.0"
 st7920 = "0.3.0"
 heapless = "0.7.16"

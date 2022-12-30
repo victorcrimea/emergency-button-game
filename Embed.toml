@@ -1,5 +1,5 @@
 [default.general]
-chip = "STM32F051R8Tx"
+chip = "STM32F401CCUx"
 
 
 [default.rtt]
